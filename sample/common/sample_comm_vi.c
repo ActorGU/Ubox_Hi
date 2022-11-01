@@ -126,7 +126,7 @@ combo_dev_attr_t LVDS_2LANE_8BIT_CML1024_NOWDR_ATTR =
         .fid_attr          = {LVDS_FID_NONE, HI_FALSE},
         .data_endian       = LVDS_ENDIAN_BIG,
         .sync_code_endian  = LVDS_ENDIAN_BIG,
-        .lane_id = {1,3,-1,-1},
+        .lane_id = {0,2,-1,-1},
         // each vc has 4 params, sync_code[i]:
         // sync_mode is SYNC_MODE_SOF: SOF, EOF, SOL, EOL
         // sync_mode is SYNC_MODE_SAV: invalid sav, invalid eav, valid sav, valid eav 
@@ -3125,7 +3125,7 @@ HI_S32 SAMPLE_COMM_VI_UpdateVIVPSSMode(VI_VPSS_MODE_S* pstVIVPSSMode)
     return HI_SUCCESS;
 }
 
-HI_S32 SAMPLE_COMM_VI_SetParam(SAMPLE_VI_CONFIG_S* pstViConfig)
+HI_S32 SAMPLE_COMM_VI_SetParam(SAMPLE_VI_CONFIG_S* pstViConfig )
 {
     HI_S32              i;
     HI_S32              s32ViNum;
@@ -5019,7 +5019,7 @@ HI_S32 SAMPLE_COMM_VI_GetFrameRateBySensor(SAMPLE_SNS_TYPE_E enMode, HI_U32* pu3
 
 
 
-HI_VOID SAMPLE_COMM_VI_GetSensorInfo(SAMPLE_VI_CONFIG_S* pstViConfig)
+HI_VOID SAMPLE_COMM_VI_GetSensorInfo(SAMPLE_VI_CONFIG_S* pstViConfig )
 {
     HI_S32 i;
 
@@ -5032,10 +5032,12 @@ HI_VOID SAMPLE_COMM_VI_GetSensorInfo(SAMPLE_VI_CONFIG_S* pstViConfig)
         pstViConfig->astViInfo[i].stPipeInfo.bMultiPipe = HI_FALSE;
         pstViConfig->astViInfo[i].stPipeInfo.bVcNumCfged = HI_FALSE;
     }
-
-    pstViConfig->astViInfo[0].stSnsInfo.enSnsType = SENSOR0_TYPE;
-    pstViConfig->astViInfo[1].stSnsInfo.enSnsType = SENSOR1_TYPE;
+        pstViConfig->astViInfo[0].stSnsInfo.enSnsType = SENSOR0_TYPE;
+        pstViConfig->astViInfo[1].stSnsInfo.enSnsType = SENSOR1_TYPE;
+    
+    // pstViConfig->astViInfo[1].stSnsInfo.enSnsType = SENSOR1_TYPE;
     printf("SENSOR0_TYPE:%d",pstViConfig->astViInfo[0].stSnsInfo.enSnsType);
+    // printf("SENSOR1_TYPE:%d",pstViConfig->astViInfo[1].stSnsInfo.enSnsType);
 }
 
 combo_dev_t SAMPLE_COMM_VI_GetComboDevBySensor(SAMPLE_SNS_TYPE_E enMode, HI_S32 s32SnsIdx)

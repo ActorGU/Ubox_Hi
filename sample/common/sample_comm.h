@@ -670,6 +670,8 @@ HI_VOID SAMPLE_COMM_VDEC_StartGetPic(HI_S32 s32ChnNum, VDEC_THREAD_PARAM_S *pstV
 HI_VOID SAMPLE_COMM_VDEC_StopGetPic(HI_S32 s32ChnNum, VDEC_THREAD_PARAM_S *pstVdecGet, pthread_t *pVdecThread);
 HI_S32 SAMPLE_COMM_VDEC_Start(HI_S32 s32ChnNum, SAMPLE_VDEC_ATTR *pastSampleVdec);
 HI_S32 SAMPLE_COMM_VDEC_Stop(HI_S32 s32ChnNum);
+
+
 #ifdef __cplusplus
 #if __cplusplus
 }

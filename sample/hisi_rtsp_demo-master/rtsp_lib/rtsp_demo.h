@@ -53,6 +53,10 @@ uint64_t rtsp_get_ntptime (void);
 int rtsp_sync_video_ts (rtsp_session_handle session, uint64_t ts, uint64_t ntptime);
 int rtsp_sync_audio_ts (rtsp_session_handle session, uint64_t ts, uint64_t ntptime);
 
+//user func
+void tcpserver();
+void SaveRaw_Inquire();
+
 #ifdef __cplusplus
 }
 #endif

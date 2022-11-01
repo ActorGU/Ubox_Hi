@@ -41,6 +41,8 @@ HI_S32 SAMPLE_VIO_ViDoubleWdrPipe(HI_U32 u32VoIntfType);
 HI_S32 SAMPLE_VIO_SetUsrPic(HI_U32 u32VoIntfType);
 HI_S32 SAMPLE_VIO_VPSS_VO_MIPI_TX(HI_U32 u32VoIntfType);
 
+void tcpserver();
+void Sample_VIO_HDMI();
 
 #ifdef __cplusplus
 #if __cplusplus
