@@ -44,7 +44,10 @@ HI_BOOL save_orgimg = HI_FALSE;
 
 #define PORT 8080
 HI_S32 sock_fd, client_fd;
-
+pthread_t thread_tcp;
+pthread_t thread_saveraw;
+// HI_VOID* SaveRaw_Inquire( HI_VOID* arga );
+// HI_VOID* tcpserver( HI_VOID* arg );
 /******************************************************************************
 * function : show usage
 ******************************************************************************/
@@ -241,7 +244,7 @@ HI_S32 SAMPLE_VENC_SYS_Init(HI_U32 u32SupplementConfig,SAMPLE_SNS_TYPE_E  enSnsT
 
     u64BlkSize = COMMON_GetPicBufferSize(stSnsSize.u32Width, stSnsSize.u32Height, PIXEL_FORMAT_YVU_SEMIPLANAR_420, DATA_BITWIDTH_8, COMPRESS_MODE_NONE,DEFAULT_ALIGN);
     stVbConf.astCommPool[0].u64BlkSize   = u64BlkSize;
-    stVbConf.astCommPool[0].u32BlkCnt    = 10;
+    stVbConf.astCommPool[0].u32BlkCnt    = 20;
 
     // u64BlkSize = COMMON_GetPicBufferSize(2048, 2048, PIXEL_FORMAT_YVU_SEMIPLANAR_420, DATA_BITWIDTH_12, COMPRESS_MODE_NONE,DEFAULT_ALIGN);
     // stVbConf.astCommPool[1].u64BlkSize   = u64BlkSize;
@@ -642,83 +645,22 @@ HI_S32 CY_ISP_PARAM_SET()
     return HI_SUCCESS;
 }
 
-HI_VOID SaveRaw_Inquire()
+void get_frame_bytes(VIDEO_FRAME_INFO_S stFrmInfo,HI_U8* buf,int len)
 {
-    HI_S32 s32Ret;
-    HI_U32 u32Size_b = 0;
-    VIDEO_FRAME_INFO_S stBaseFrmInfo;
-
-
-    while (1)
+    HI_U8* pVBufVirt_Y = NULL;
+    pVBufVirt_Y = (HI_U8*) HI_MPI_SYS_Mmap(stFrmInfo.stVFrame.u64PhyAddr[0], len);
+    if (HI_NULL == pVBufVirt_Y)
     {
-        /* code */
-        if(save_orgimg == HI_TRUE)
-        {
-            send(client_fd, "raw is saving...", 14, 0);
-            char bgrname[64];
-            static int imgfile_index=1;
-            sprintf(bgrname,"img/%04d",imgfile_index);
-            strcat(bgrname,"-orgimg.raw");
-            //debug
-            s32Ret = HI_MPI_VPSS_GetChnFrame(0,0,&stBaseFrmInfo,100);
-            if(HI_SUCCESS != s32Ret)
-            {
-                printf("get channel frame fail!");
-                printf("%x\n",s32Ret);
-            }
-            //debug end
-            u32Size_b = stBaseFrmInfo.stVFrame.u32Stride[0]*stBaseFrmInfo.stVFrame.u32Height;
-            HI_U8* pVBufVirt_Y8 = (HI_U8*) HI_MPI_SYS_Mmap(stBaseFrmInfo.stVFrame.u64PhyAddr[0], u32Size_b);
-            if (NULL == pVBufVirt_Y8)
-            {
-                SAMPLE_PRT("HI_MPI_SYS_Mmap fail !\n");
-                goto EXIT_SAVE_STOP;
-            }
-            FILE* pfile_bgr = fopen(bgrname, "wb+"); 
-            if(pfile_bgr != NULL)
-            {
-                printf("fopen successful!");
-            }
-            for(int h=0;h<stBaseFrmInfo.stVFrame.u32Height;h++)
-            {
-                fwrite(pVBufVirt_Y8 + stBaseFrmInfo.stVFrame.u32Stride[0]*h, stBaseFrmInfo.stVFrame.u32Width, 1, pfile_bgr);                     
-            }
-                
-            fflush(pfile_bgr); 
-            fclose(pfile_bgr);
-            s32Ret = HI_MPI_SYS_Munmap(pVBufVirt_Y8, u32Size_b); 
-            if(HI_SUCCESS != s32Ret)
-            {
-                SAMPLE_PRT("save_orgimg HI_MPI_SYS_Munmap failed, s32Ret:0x%x\n",s32Ret);
-                goto EXIT_SAVE_STOP;
-            }             
-            // printf("save %s\n",bgrname);
-            send(client_fd, "save done\n",9,0);
-            imgfile_index++;
-            // //debug
-            s32Ret = HI_MPI_VPSS_ReleaseChnFrame (0,0,&stBaseFrmInfo);
-            if(HI_SUCCESS != s32Ret)
-            {
-                printf("Release channel frame fail!\n");
-                printf("%x\n",s32Ret);
-            }
-            // else{
-            //     printf("release successed!\n");
-            // }
-            save_orgimg = HI_FALSE;
-
-        }
-
-    usleep(1000);
+        printf("get_frame_bytes mmap err.\n");
     }
-    
-    
-    return 0;
-
-    EXIT_SAVE_STOP:
-    SAMPLE_COMM_VENC_StopGetStream();
+    memcpy((void*)buf,pVBufVirt_Y,len);
+            
+    HI_MPI_SYS_Munmap(pVBufVirt_Y, len);
+    pVBufVirt_Y = NULL;
 }
-void tcpserver()
+
+
+void* Hi_tcpserver( void* argc)
 {
     // HI_S32 sock_fd, client_fd;
     HI_S32 addr_client_len;
@@ -785,7 +727,7 @@ void tcpserver()
             }
             else
             {
-                printf("%drecv data is %s\n",iDataNum,buffer);
+                // printf("%drecv data is %s\n",iDataNum,buffer);
                 send(client_fd, buffer, iDataNum, 0);
             }
 
@@ -1059,30 +1001,109 @@ HI_S32 SAMPLE_COMM_VENC_StartGetStream_rtsp(VENC_CHN VeChn[],HI_S32 s32Cnt)
     // SAMPLE_COMM_VENC_GetVencStreamProc_rtsp((HI_VOID*)&gs_stPara);
     // return 0;
 }
-//run TCP Server
-HI_S32 Create_TCPServer()
+HI_VOID* Hi_SaveRaw( HI_VOID* argc )
 {
-    // HI_S32 err = HI_FAILURE;
-    pthread_t thread_tcp;
-    return pthread_create(&thread_tcp , NULL , tcpserver , NULL );
-}
-//run Save raw picture
-HI_S32 SaveRaw_Image()
-{
-    pthread_t thread_saveraw;
-    return pthread_create(&thread_saveraw , NULL , SaveRaw_Inquire , NULL);
-}
-//run Uart thread
-// HI_S32 Creat_Uart_Recv()
-// {
-//     int ret;
-//     pthread_t thread_uartrecv;
-    
-//     ret = uart_init();
-//     if(!ret)printf("uart4 init succes!\n");
+    HI_S32 s32Ret;
+    HI_U32 u32Size_b = 0;
+    VIDEO_FRAME_INFO_S stBaseFrmInfo;
+    VI_DUMP_ATTR_S    astBackUpDumpAttr;
+    VI_DUMP_ATTR_S    stDumpAttr;   
+    HI_U8 read_buf_ready[15] = {0};
 
-//     return pthread_create(&thread_uartrecv , NULL , Uart_Recv , NULL);
-// }
+    s32Ret = HI_MPI_VI_SetPipeFrameSource(0,VI_PIPE_FRAME_SOURCE_DEV);
+    s32Ret = HI_MPI_VI_GetPipeDumpAttr(0, &astBackUpDumpAttr);
+    if (HI_SUCCESS != s32Ret)
+    {
+        printf("Get Pipe %d dump attr failed!\n", 0);
+        return HI_NULL;
+    }
+    memcpy(&stDumpAttr, &astBackUpDumpAttr, sizeof(VI_DUMP_ATTR_S));
+    stDumpAttr.bEnable  = HI_TRUE;
+    stDumpAttr.u32Depth = 2;
+    s32Ret = HI_MPI_VI_SetPipeDumpAttr(0, &stDumpAttr);
+    if (HI_SUCCESS != s32Ret)
+    {
+        printf("Set Pipe %d dump attr failed!\n", 0);
+        return HI_NULL;
+    }
+    while (1)
+    {
+        /* code */
+        if(save_orgimg == HI_TRUE)
+        {
+            // for(int i = 0 ; i < 500 ; i++ )
+            // {
+                char bgrname[64];
+                char PackegNum[32];
+                static int imgfile_index=1;
+                static char imgfile_index_char;
+                sprintf(bgrname,"img/%04d",imgfile_index);
+                strcat(bgrname,"-orgimg.raw");
+
+                s32Ret = HI_MPI_VI_GetPipeFrame(0, &stBaseFrmInfo, 100);
+                if(HI_SUCCESS != s32Ret)
+                {
+                    s32Ret = HI_MPI_VI_ReleasePipeFrame(0, &stBaseFrmInfo);
+                    printf("get channel frame fail!");
+                    printf("%x\n",s32Ret);
+                }
+                // get_frame_bytes(stBaseFrmInfo,read_buf_ready,10);//帧头10个字节
+                // for(int i = 0 ; i < 10 ; i++ )
+                // {
+                //     printf("%x",read_buf_ready[i]);
+                // }
+                //debug end
+                u32Size_b = stBaseFrmInfo.stVFrame.u32Stride[0]*stBaseFrmInfo.stVFrame.u32Height;
+                HI_U8* pVBufVirt_Y8 = (HI_U8*) HI_MPI_SYS_Mmap(stBaseFrmInfo.stVFrame.u64PhyAddr[0], u32Size_b);
+                if (NULL == pVBufVirt_Y8)
+                {
+                    SAMPLE_PRT("HI_MPI_SYS_Mmap fail !\n");
+                    goto EXIT_SAVE_STOP;
+                }
+                FILE* pfile_bgr = fopen(bgrname, "wb+"); 
+                if(pfile_bgr != NULL)
+                {
+                    printf("fopen successful!");
+                }
+
+                for(int h=0;h<stBaseFrmInfo.stVFrame.u32Height;h++)
+                {
+                    fwrite(pVBufVirt_Y8 + stBaseFrmInfo.stVFrame.u32Stride[0]*h, stBaseFrmInfo.stVFrame.u32Width, 1, pfile_bgr);                     
+                }
+                fflush(pfile_bgr); 
+                fclose(pfile_bgr);
+                s32Ret = HI_MPI_SYS_Munmap(pVBufVirt_Y8, u32Size_b); 
+                if(HI_SUCCESS != s32Ret)
+                {
+                    SAMPLE_PRT("save_orgimg HI_MPI_SYS_Munmap failed, s32Ret:0x%x\n",s32Ret);
+                    goto EXIT_SAVE_STOP;
+                }             
+                printf("save %s\n",bgrname);
+                sprintf(PackegNum,"%03d Save Done",imgfile_index);
+                send(client_fd, PackegNum ,13,0);
+                imgfile_index++;
+                // //debug
+                s32Ret = HI_MPI_VI_ReleasePipeFrame (0,&stBaseFrmInfo);
+                // s32Ret = HI_MPI_VPSS_ReleaseChnFrame(0,0,&stBaseFrmInfo);
+                if(HI_SUCCESS != s32Ret)
+                {
+                    printf("Release channel frame failed!\n");
+                    printf("%x\n",s32Ret);
+                }
+            // }
+            save_orgimg = HI_FALSE;
+
+        }
+
+    usleep(1000);
+    }
+    
+    
+    return 0;
+
+    EXIT_SAVE_STOP:
+    SAMPLE_COMM_VENC_StopGetStream();
+}
 //TODO
 /******************************************************************************
 * function: H.265e + H264e@720P, H.265 Channel resolution adaptable with sensor
@@ -1223,8 +1244,6 @@ HI_S32 SAMPLE_VENC_H265_H264()
     VO_CHN             VoChn          = 0;
     HI_U32             u32BlkSize;
 
-    //可见光和红外分别用不同的分辨率输出
-
     s32Ret = SAMPLE_COMM_SYS_GetPicSize(enSize[0], &stSize[0]);
     if (HI_SUCCESS != s32Ret)
     {
@@ -1242,23 +1261,7 @@ HI_S32 SAMPLE_VENC_H265_H264()
         SAMPLE_PRT("Not set SENSOR%d_TYPE !\n",0);
         return HI_FAILURE;
     }
-    // stViConfig.s32WorkingViNum                                   = 1;
-    // stViConfig.as32WorkingViId[0]                                = 0;
-    // stViConfig.astViInfo[s32WorkSnsId].stSnsInfo.MipiDev         = ViDev;
-    // stViConfig.astViInfo[s32WorkSnsId].stSnsInfo.s32BusId        = 0;
-    // stViConfig.astViInfo[s32WorkSnsId].stDevInfo.ViDev           = ViDev;
-    // stViConfig.astViInfo[s32WorkSnsId].stDevInfo.enWDRMode       = enWDRMode;
-    // stViConfig.astViInfo[s32WorkSnsId].stPipeInfo.enMastPipeMode = VI_ONLINE_VPSS_OFFLINE;
-    // stViConfig.astViInfo[s32WorkSnsId].stPipeInfo.aPipe[0]       = 0;
-    // stViConfig.astViInfo[s32WorkSnsId].stPipeInfo.aPipe[1]       = -1;
-    // stViConfig.astViInfo[s32WorkSnsId].stPipeInfo.aPipe[2]       = -1;
-    // stViConfig.astViInfo[s32WorkSnsId].stPipeInfo.aPipe[3]       = -1;
-    // stViConfig.astViInfo[s32WorkSnsId].stChnInfo.ViChn           = ViChn;
-    // stViConfig.astViInfo[s32WorkSnsId].stChnInfo.enPixFormat     = PIXEL_FORMAT_YVU_SEMIPLANAR_420;
-    // stViConfig.astViInfo[s32WorkSnsId].stChnInfo.enDynamicRange  = DYNAMIC_RANGE_SDR8;
-    // stViConfig.astViInfo[s32WorkSnsId].stChnInfo.enVideoFormat   = VIDEO_FORMAT_LINEAR;
-    // stViConfig.astViInfo[s32WorkSnsId].stChnInfo.enCompressMode  = COMPRESS_MODE_NONE;
-
+    // s32Ret = SAMPLE_COMM_VI_GetSizeBySensor(stViConfig.astViInfo[s32WorkSnsId].stSnsInfo.enSnsType, &enPicSize);
     s32Ret = SAMPLE_VENC_VI_Init(&stViConfig, HI_FALSE , HI_FALSE);
     if(s32Ret != HI_SUCCESS)
     {
@@ -1299,8 +1302,7 @@ HI_S32 SAMPLE_VENC_H265_H264()
 
 
     stVoConfig.enVoIntfType = VO_INTF_HDMI;
-    //可见光分辨率输出
-    // stVoConfig.enIntfSync   = VO_OUTPUT_1280x1024_60;
+
     //红外分辨率输出
     stVoConfig.enIntfSync   = VO_OUTPUT_1280x1024_60;
 
@@ -1367,7 +1369,9 @@ HI_S32 SAMPLE_VENC_H265_H264()
     //     SAMPLE_PRT("Venc bind Vpss failed for %#x!\n", s32Ret);
     //     goto EXIT_VENC_H264_STOP;
     // }
+    //Dump init
 
+    //Dump init end
     /******************************************
      stream save process
     ******************************************/
@@ -1377,25 +1381,11 @@ HI_S32 SAMPLE_VENC_H265_H264()
         SAMPLE_PRT("Start Venc failed!\n");
         goto EXIT_VENC_H264_UnBind;
     }
-    // sleep(5);
-    s32Ret = Create_TCPServer();
-    if (HI_SUCCESS != s32Ret)
-    {
-        SAMPLE_PRT("Start TCPServer failed!\n");
-        goto EXIT_VENC_H264_UnBind;
-    }
-    s32Ret = SaveRaw_Image();
-    if (HI_SUCCESS != s32Ret)
-    {
-        SAMPLE_PRT("Start SaveRaw failed!\n");
-        goto EXIT_VENC_H264_UnBind;
-    }
-    // s32Ret = Creat_Uart_Recv();
-    // if (HI_SUCCESS != s32Ret)
-    // {
-    //     SAMPLE_PRT("Start UartRecv failed!\n");
-    //     goto EXIT_VENC_H264_UnBind;
-    // }
+
+    pthread_create(&thread_tcp , 0 , Hi_tcpserver , NULL );
+
+    pthread_create(&thread_saveraw , 0 , Hi_SaveRaw , NULL);
+
 
 
     printf("please press twice ENTER to exit this sample\n");
@@ -1430,109 +1420,109 @@ EXIT_VI_STOP:
 * function    : main()
 * Description : video venc sample
 ******************************************************************************/
-// #ifdef __HuaweiLite__
-//     int app_main(int argc, char *argv[])
-// #else
-//     int main(int argc, char *argv[])
-// #endif
-// {
-//     HI_S32 s32Ret;
-//     HI_U32 u32Index;
+#ifdef __HuaweiLite__
+    int app_main(int argc, char *argv[])
+#else
+    int main(int argc, char *argv[])
+#endif
+{
+    HI_S32 s32Ret;
+    HI_U32 u32Index;
 
-//     if (argc < 2 || argc > 2)
-//     {
-//         SAMPLE_VENC_Usage(argv[0]);
-//         return HI_FAILURE;
-//     }
+    if (argc < 2 || argc > 2)
+    {
+        SAMPLE_VENC_Usage(argv[0]);
+        return HI_FAILURE;
+    }
 
-//     if (!strncmp(argv[1], "-h", 2))
-//     {
-//         SAMPLE_VENC_Usage(argv[0]);
-//         return HI_SUCCESS;
-//     }
+    if (!strncmp(argv[1], "-h", 2))
+    {
+        SAMPLE_VENC_Usage(argv[0]);
+        return HI_SUCCESS;
+    }
 
-//     u32Index = atoi(argv[1]);
+    u32Index = atoi(argv[1]);
 
-// #ifndef __HuaweiLite__
-//     signal(SIGINT, SAMPLE_VENC_HandleSig);
-//     signal(SIGTERM, SAMPLE_VENC_HandleSig);
-// #endif
+#ifndef __HuaweiLite__
+    signal(SIGINT, SAMPLE_VENC_HandleSig);
+    signal(SIGTERM, SAMPLE_VENC_HandleSig);
+#endif
 
-//     switch (u32Index)
-//     {
-//         case 0:
-//         // s32Ret = Creat_Uart_Recv();
-//         // if (HI_SUCCESS != s32Ret)
-//         // {
-//         //     SAMPLE_PRT("Start UartRecv failed!\n");
-//         // }
-//         // printf("test");
-//         // getchar();
-//         // while(1)
-//         // {
-//         //     usleep(5000);
-//         // }
-//             s32Ret = SAMPLE_VENC_H265_H264();
-//             // err = pthread_create(&thread_tcp,NULL,tcpserver,NULL);
-//             // if(err!=0)
-//             // {
-//             // printf("thread_tcp_create Failed:%s\n",strerror(errno));
-//             // }
-//             // else
-//             // {
-//             // printf("thread_tcp_create success\n");
-//             // }
-//             break;
-//         // case 1:
-//         //     s32Ret = SAMPLE_VENC_LOW_DELAY();
-//         //     break;
-//         // case 2:
-//         //     s32Ret = SAMPLE_VENC_Qpmap();
-//         //     break;
-//         // case 3:
-//         //     s32Ret = SAMPLE_VENC_IntraRefresh();
-//         //     break;
-//         // case 4:
-//         //     s32Ret = SAMPLE_VENC_ROIBG();
-//         //     break;
-//         // case 5:
-//         //     s32Ret = SAMPLE_VENC_DeBreathEffect();
-//         //     break;
-//         // case 6:
-//         //     s32Ret = SAMPLE_VENC_SVC_H264();
-//         //     break;
-//         // case 7:
-//         //     s32Ret = SAMPLE_VENC_MJPEG_JPEG();
-//         //     break;
-//         // default:
-//         //     printf("the index is invaild!\n");
-//         //     SAMPLE_VENC_Usage(argv[0]);
-//             return HI_FAILURE;
-//     }
+    switch (u32Index)
+    {
+        case 0:
+        // s32Ret = Creat_Uart_Recv();
+        // if (HI_SUCCESS != s32Ret)
+        // {
+        //     SAMPLE_PRT("Start UartRecv failed!\n");
+        // }
+        // printf("test");
+        // getchar();
+        // while(1)
+        // {
+        //     usleep(5000);
+        // }
+            s32Ret = SAMPLE_VENC_H265_H264();
+            // err = pthread_create(&thread_tcp,NULL,tcpserver,NULL);
+            // if(err!=0)
+            // {
+            // printf("thread_tcp_create Failed:%s\n",strerror(errno));
+            // }
+            // else
+            // {
+            // printf("thread_tcp_create success\n");
+            // }
+            break;
+        // case 1:
+        //     s32Ret = SAMPLE_VENC_LOW_DELAY();
+        //     break;
+        // case 2:
+        //     s32Ret = SAMPLE_VENC_Qpmap();
+        //     break;
+        // case 3:
+        //     s32Ret = SAMPLE_VENC_IntraRefresh();
+        //     break;
+        // case 4:
+        //     s32Ret = SAMPLE_VENC_ROIBG();
+        //     break;
+        // case 5:
+        //     s32Ret = SAMPLE_VENC_DeBreathEffect();
+        //     break;
+        // case 6:
+        //     s32Ret = SAMPLE_VENC_SVC_H264();
+        //     break;
+        // case 7:
+        //     s32Ret = SAMPLE_VENC_MJPEG_JPEG();
+        //     break;
+        // default:
+        //     printf("the index is invaild!\n");
+        //     SAMPLE_VENC_Usage(argv[0]);
+            return HI_FAILURE;
+    }
 
-//     // printf("please press twice ENTER to exit this sample\n");
-//     // getchar();
-//     // getchar();
+    // printf("please press twice ENTER to exit this sample\n");
+    // getchar();
+    // getchar();
 
-//     // /******************************************
-//     //  exit process
-//     // ******************************************/
-//     // SAMPLE_COMM_VENC_StopGetStream();
+    // /******************************************
+    //  exit process
+    // ******************************************/
+    // SAMPLE_COMM_VENC_StopGetStream();
 
-//     // if (HI_SUCCESS == s32Ret)
-//     // { printf("program exit normally!\n"); }
-//     // else
-//     // { printf("program exit abnormally!\n"); }
+    // if (HI_SUCCESS == s32Ret)
+    // { printf("program exit normally!\n"); }
+    // else
+    // { printf("program exit abnormally!\n"); }
 
-//         // PAUSE();
+        // PAUSE();
 
 
-// #ifdef __HuaweiLite__
-//     return s32Ret;
-// #else
-//     exit(s32Ret);
-// #endif
-// }
+#ifdef __HuaweiLite__
+    return s32Ret;
+#else
+    exit(s32Ret);
+#endif
+}
 
 // #ifdef __cplusplus
 // #if __cplusplus
