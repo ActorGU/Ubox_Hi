@@ -35,7 +35,7 @@ extern HI_S32 SAMPLE_COMM_VENC_GetFilePostfix(PAYLOAD_TYPE_E enPayload, char* sz
 
 rtsp_demo_handle g_rtsplive = NULL;
 rtsp_session_handle session = NULL;
-HI_BOOL save_orgimg = HI_FALSE;
+HI_BOOL save_orgimg = HI_TRUE;
 #ifdef HI_FPGA
     #define PIC_SIZE   PIC_1080P
 #else
@@ -1008,7 +1008,14 @@ HI_VOID* Hi_SaveRaw( HI_VOID* argc )
     VIDEO_FRAME_INFO_S stBaseFrmInfo;
     VI_DUMP_ATTR_S    astBackUpDumpAttr;
     VI_DUMP_ATTR_S    stDumpAttr;   
-    HI_U8 read_buf_ready[15] = {0};
+    HI_U8 read_buf_ready[10] = {0};
+    HI_U16 Img_Head0;
+    HI_U16 Img_Head1;
+    HI_U16 FrameNum_current;
+    HI_U16 FrameNum_reg;
+    HI_U16 FrameNum_total;
+    HI_U16 Valid_H;
+
 
     s32Ret = HI_MPI_VI_SetPipeFrameSource(0,VI_PIPE_FRAME_SOURCE_DEV);
     s32Ret = HI_MPI_VI_GetPipeDumpAttr(0, &astBackUpDumpAttr);
@@ -1031,67 +1038,92 @@ HI_VOID* Hi_SaveRaw( HI_VOID* argc )
         /* code */
         if(save_orgimg == HI_TRUE)
         {
-            // for(int i = 0 ; i < 500 ; i++ )
-            // {
-                char bgrname[64];
-                char PackegNum[32];
-                static int imgfile_index=1;
-                static char imgfile_index_char;
-                sprintf(bgrname,"img/%04d",imgfile_index);
-                strcat(bgrname,"-orgimg.raw");
+            char bgrname[64];
+            static int imgfile_index = 1;
+            static int savedone_index = 0;
+            sprintf(bgrname,"img/%04d",imgfile_index);
+            strcat(bgrname,"-orgimg.raw");
+            FILE* pfile_bgr;
+            char PackegNum[32];
+            s32Ret = HI_MPI_VI_GetPipeFrame(0, &stBaseFrmInfo, 500);
+            if(HI_SUCCESS != s32Ret)
+            {
+                s32Ret = HI_MPI_VI_ReleasePipeFrame(0, &stBaseFrmInfo);
+                printf("get channel frame fail!");
+                printf("%x\n",s32Ret);
+            }
+            get_frame_bytes(stBaseFrmInfo,read_buf_ready,10);//帧头10个字节
 
-                s32Ret = HI_MPI_VI_GetPipeFrame(0, &stBaseFrmInfo, 100);
-                if(HI_SUCCESS != s32Ret)
+            Img_Head0           = read_buf_ready[1] << 8 |read_buf_ready[0];//帧头0
+            Img_Head1           = read_buf_ready[3] << 8 |read_buf_ready[2];//帧头1
+            FrameNum_current    = read_buf_ready[5] << 8 |read_buf_ready[4];//当前帧编号
+            FrameNum_total      = read_buf_ready[7] << 8 |read_buf_ready[6];//总帧数
+            Valid_H             = read_buf_ready[9] << 8 |read_buf_ready[8];//有效数据行数
+            FrameNum_total = 5000;//debug
+            Valid_H = 100;//debug
+            if((Img_Head0 == 0xC53A)&&(Img_Head1 == 0xA35C))
+            {
+                //debug 存储图像的第3000至8000帧
+                if(FrameNum_current == 0x0BB6)//debug 
                 {
-                    s32Ret = HI_MPI_VI_ReleasePipeFrame(0, &stBaseFrmInfo);
-                    printf("get channel frame fail!");
-                    printf("%x\n",s32Ret);
+                    pfile_bgr = fopen(bgrname, "ab+");
+                    if(pfile_bgr == NULL)
+                    {
+                        printf("fopen fail!");
+                    }
                 }
-                // get_frame_bytes(stBaseFrmInfo,read_buf_ready,10);//帧头10个字节
-                // for(int i = 0 ; i < 10 ; i++ )
-                // {
-                //     printf("%x",read_buf_ready[i]);
-                // }
-                //debug end
-                u32Size_b = stBaseFrmInfo.stVFrame.u32Stride[0]*stBaseFrmInfo.stVFrame.u32Height;
-                HI_U8* pVBufVirt_Y8 = (HI_U8*) HI_MPI_SYS_Mmap(stBaseFrmInfo.stVFrame.u64PhyAddr[0], u32Size_b);
-                if (NULL == pVBufVirt_Y8)
+                if(( FrameNum_current >= 0x0BB8 )&&( FrameNum_current <= 0x1F40 ))
                 {
-                    SAMPLE_PRT("HI_MPI_SYS_Mmap fail !\n");
-                    goto EXIT_SAVE_STOP;
-                }
-                FILE* pfile_bgr = fopen(bgrname, "wb+"); 
-                if(pfile_bgr != NULL)
-                {
-                    printf("fopen successful!");
-                }
+                    // u32Size_b = stBaseFrmInfo.stVFrame.u32Stride[0]*stBaseFrmInfo.stVFrame.u32Height;
+                    u32Size_b = stBaseFrmInfo.stVFrame.u32Stride[0]*Valid_H;//debug 只映射有效行
+                    HI_U8* pVBufVirt_Y8 = (HI_U8*) HI_MPI_SYS_Mmap(stBaseFrmInfo.stVFrame.u64PhyAddr[0], u32Size_b);
+                    if (NULL == pVBufVirt_Y8)
+                    {
+                        SAMPLE_PRT("HI_MPI_SYS_Mmap fail !\n");
+                        goto EXIT_SAVE_STOP;
+                    }
+                    // FILE* pfile_bgr = fopen(bgrname, "ab+"); //待优化
+                    // if(pfile_bgr == NULL)
+                    // {
+                    //     printf("fopen fail!");
+                    // }
 
-                for(int h=0;h<stBaseFrmInfo.stVFrame.u32Height;h++)
-                {
-                    fwrite(pVBufVirt_Y8 + stBaseFrmInfo.stVFrame.u32Stride[0]*h, stBaseFrmInfo.stVFrame.u32Width, 1, pfile_bgr);                     
+                    for(int h=0;h<Valid_H;h++)
+                    {
+                        fwrite(pVBufVirt_Y8 + stBaseFrmInfo.stVFrame.u32Stride[0]*h, stBaseFrmInfo.stVFrame.u32Width, 1, pfile_bgr);                     
+                    }
+                    // fflush(pfile_bgr); 
+                    // fclose(pfile_bgr);
+                    s32Ret = HI_MPI_SYS_Munmap(pVBufVirt_Y8, u32Size_b); 
+                    if(HI_SUCCESS != s32Ret)
+                    {
+                        SAMPLE_PRT("save_orgimg HI_MPI_SYS_Munmap failed, s32Ret:0x%x\n",s32Ret);
+                        goto EXIT_SAVE_STOP;
+                    }             
+                    sprintf(PackegNum,"NO.%04d Save Done -- %05d\n",FrameNum_current,savedone_index);
+                    send(client_fd, PackegNum ,27,0);
+                    savedone_index++;
                 }
-                fflush(pfile_bgr); 
-                fclose(pfile_bgr);
-                s32Ret = HI_MPI_SYS_Munmap(pVBufVirt_Y8, u32Size_b); 
-                if(HI_SUCCESS != s32Ret)
+                else
                 {
-                    SAMPLE_PRT("save_orgimg HI_MPI_SYS_Munmap failed, s32Ret:0x%x\n",s32Ret);
-                    goto EXIT_SAVE_STOP;
-                }             
-                printf("save %s\n",bgrname);
-                sprintf(PackegNum,"%03d Save Done",imgfile_index);
-                send(client_fd, PackegNum ,13,0);
-                imgfile_index++;
+
+                }
                 // //debug
                 s32Ret = HI_MPI_VI_ReleasePipeFrame (0,&stBaseFrmInfo);
-                // s32Ret = HI_MPI_VPSS_ReleaseChnFrame(0,0,&stBaseFrmInfo);
                 if(HI_SUCCESS != s32Ret)
                 {
                     printf("Release channel frame failed!\n");
                     printf("%x\n",s32Ret);
                 }
-            // }
-            save_orgimg = HI_FALSE;
+                if( savedone_index >  FrameNum_total )
+                {
+                    fflush(pfile_bgr);
+                    fclose(pfile_bgr);
+                    save_orgimg = HI_FALSE;
+                }
+            }
+
+
 
         }
 
@@ -1375,12 +1407,12 @@ HI_S32 SAMPLE_VENC_H265_H264()
     /******************************************
      stream save process
     ******************************************/
-    s32Ret = SAMPLE_COMM_VENC_StartGetStream_rtsp(VencChn,s32ChnNum);
-    if (HI_SUCCESS != s32Ret)
-    {
-        SAMPLE_PRT("Start Venc failed!\n");
-        goto EXIT_VENC_H264_UnBind;
-    }
+    // s32Ret = SAMPLE_COMM_VENC_StartGetStream_rtsp(VencChn,s32ChnNum);
+    // if (HI_SUCCESS != s32Ret)
+    // {
+    //     SAMPLE_PRT("Start Venc failed!\n");
+    //     goto EXIT_VENC_H264_UnBind;
+    // }
 
     pthread_create(&thread_tcp , 0 , Hi_tcpserver , NULL );
 
